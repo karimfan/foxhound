@@ -899,18 +899,45 @@ func summarize(apiKey string, b dirBundle) (string, error) {
 
 	reqBody := apiRequest{
 		Model:     llmModel,
-		MaxTokens: 1024,
-		System: `You are writing navigation documentation for an LLM that will use this wiki to find relevant code for a given task. The LLM reads the wiki top-down, so each summary must help it decide which files or subdirectories to drill into.
+		MaxTokens: 2048,
+		System: `You are writing documentation for an LLM that will use this wiki to understand and modify a codebase. The LLM reads the wiki top-down, so each summary must help it both navigate (which files to open) and comprehend (how things work and connect) without reading every source file.
 
-Write a concise markdown summary following this structure:
+Write a markdown summary following this structure:
 
-1. **Overview** (1-2 sentences): What this directory is responsible for. State its role in the larger system.
-2. **Key files**: Bullet list with relative links and one-line descriptions: - [filename](./filename) — description
-3. **Key types/functions**: The most important exported types, functions, or interfaces.
-4. **When to look here**: A bullet list of task descriptions that would lead an LLM to this directory. For example: "Modifying how Cedar policies are parsed", "Adding a new CLI subcommand", "Changing container network rules". Be specific to what the code actually does.
-5. **Child directories** (if any): For each child, a bullet with a one-line description of what it owns and what tasks would require looking there.
+## Overview
+1-3 sentences: What this directory is responsible for. State its role in the larger system.
 
-Keep it concise and accurate. Do not invent functionality not present in the code. Use relative file links.`,
+## Key files
+Bullet list with relative links and one-line descriptions:
+- [filename](./filename) — description
+
+## How it works
+Explain the internal data flow and control flow. How do the files in this directory interact? What are the key call chains? If there is a primary entry point, start there and trace the flow. For example: "Requests arrive at handler.go, which validates input using validator.go, then calls store.go to persist. Errors are wrapped by errors.go and returned as HTTP responses."
+
+## Key types and interfaces
+List the most important exported types, functions, and interfaces. For interfaces, note who implements them. For key functions, note who calls them and what they return. Group related items rather than listing everything flat.
+
+## Dependencies
+Which other packages/directories does this code import from or get called by? List the most important ones with a brief note on the relationship:
+- Imports: "policy/ for PolicySet, cedar/ for Compile()"
+- Imported by: "runner/ calls LSMManager.Load(), leashd/ calls UpdateRuntimeRules()"
+
+If you can determine this from the code, include it. If you cannot determine the full picture, list what you can see from imports and function signatures.
+
+## Configuration
+Note any environment variables, config files, CLI flags, or constants that control behavior in this directory. Skip this section if there are none.
+
+## When to look here
+Bullet list of task descriptions that would lead an LLM to this directory. Be specific to what the code actually does. For example: "Modifying how Cedar policies are parsed", "Adding a new CLI subcommand", "Changing container network rules".
+
+## Child directories
+(If any) For each child, a bullet with a description of what it owns and what tasks would require looking there.
+
+Guidelines:
+- Be concise but not shallow. Prioritize understanding over brevity.
+- Do not invent functionality not present in the code.
+- Use relative file links for files in this directory.
+- Omit any section that has no meaningful content (e.g., skip Configuration if there are no config knobs).`,
 		Messages: []apiMessage{
 			{Role: "user", Content: prompt},
 		},
@@ -1178,17 +1205,28 @@ func summarizeRoot(apiKey string, topDirs []string, summaries map[string]string)
 
 	reqBody := apiRequest{
 		Model:     llmModel,
-		MaxTokens: 1024,
-		System: `You are writing the root page of a codebase wiki that an LLM will use to navigate code for tasks.
+		MaxTokens: 2048,
+		System: `You are writing the root page of a codebase wiki that an LLM will use to understand and navigate code for tasks.
 
 Given summaries of all top-level directories, produce:
 
-1. **Project overview** (2-3 sentences): What the project is and does.
-2. **Architecture snapshot** (3-5 sentences): How the major pieces connect.
-3. **Navigation guide**: A bullet list mapping task categories to directories. For example:
-   - "To modify CLI commands → cmd/"
-   - "To change policy enforcement → internal/lsm/, internal/transpiler/"
-   - "To update the web UI → controlui/"
+## Project overview
+2-3 sentences: What the project is, what problem it solves, and who uses it.
+
+## Architecture
+How the major pieces connect. Describe the key data flows end-to-end. For example: "User invokes the CLI (cmd/), which starts a daemon (internal/leashd/) that loads Cedar policies (internal/policy/) and enforces them via eBPF (internal/lsm/). The control UI (controlui/) connects over WebSocket to show real-time events." Cover 2-3 primary flows, not every package.
+
+## Key concepts
+Define 3-5 domain-specific terms or concepts that appear throughout the codebase and that an LLM needs to understand before reading the code. For example: "Cedar policy", "LSM rule", "transpiler", "MCP observability". One sentence each.
+
+## Navigation guide
+A bullet list mapping task categories to specific directories. Be specific — list the exact directories, not just top-level ones. For example:
+- "To modify CLI commands → cmd/leash/"
+- "To change kernel-level policy enforcement → internal/lsm/, internal/transpiler/"
+- "To update the web UI → controlui/web/src/"
+- "To change how policies are parsed and watched → internal/policy/, internal/cedar/"
+
+Cover at least 10 common task categories.
 
 Be specific and accurate. Do not add a Contents listing — that will be generated separately.`,
 		Messages: []apiMessage{
