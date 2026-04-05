@@ -25,7 +25,7 @@ A Go CLI that generates hierarchical markdown and HTML documentation for any cod
 ## Usage
 
 ```bash
-# Full scan — read from <repo>, write wiki to <output>
+# Full scan — write wiki to /path/to/wiki from /path/to/repo
 go run . --output /path/to/wiki /path/to/repo
 
 # Preview what would be scanned (no API calls, no files written)
