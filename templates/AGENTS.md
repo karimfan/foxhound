@@ -1,42 +1,86 @@
 # Codebase Navigation via Wiki
 
-This project has an auto-generated codebase wiki at `{{WIKI_PATH}}`. **Always consult the wiki before reading source files.** It will save you time and tokens.
+This project has an auto-generated codebase wiki. **Read the wiki before reading source files.** It tells you where to look so you don't waste time searching.
 
 ## Wiki location
 
-The wiki root is at `{{WIKI_PATH}}`. All SUMMARY.md files for subdirectories are relative to the directory containing wiki.md.
+- **Root**: `{{WIKI_PATH}}`
+- **Directory summaries**: `{{WIKI_DIR}}/{dir}/SUMMARY.md` (one per directory in the codebase)
+- All paths inside the wiki are relative to `{{WIKI_DIR}}/`
 
-## How to use the wiki
+## How to navigate
 
-1. **Start at the root.** Read `{{WIKI_PATH}}` to get:
-   - A project overview explaining what this codebase does
-   - An architecture snapshot showing how major pieces connect
-   - A **navigation guide** mapping task categories to directories
-   - An annotated contents listing with one-line descriptions per directory
+### Step 1: Read the root
 
-2. **Match your task to a directory.** Use the navigation guide and "When to look here" sections to identify which directories are relevant. Do NOT grep the entire codebase or read files at random.
+Read `{{WIKI_PATH}}`. It contains:
+- A **project overview** (what this codebase does)
+- An **architecture snapshot** (how major pieces connect)
+- A **navigation guide** that maps task categories to directories
+- An **annotated contents** listing with one-line descriptions
 
-3. **Drill into SUMMARY.md files.** Each directory has a `SUMMARY.md` with:
-   - What the directory is responsible for
-   - Key files with descriptions
-   - Important types, functions, and interfaces
-   - A "When to look here" section for task-based routing
-   - Child directory descriptions with task routing
+### Step 2: Match your task to directories
 
-4. **Read source files last.** Only after the wiki has pointed you to the right files should you open them. The wiki tells you what each file does so you can skip irrelevant ones.
+Use the navigation guide and "When to look here" sections to find relevant directories. Pick the 1-3 most relevant, not all of them.
 
-## Navigation pattern
+### Step 3: Read the SUMMARY.md for those directories
+
+Each `SUMMARY.md` contains:
+- What the directory is responsible for
+- Key files with one-line descriptions
+- Important types, functions, and interfaces
+- A "When to look here" section
+- Child directory descriptions
+
+If a child directory looks relevant, read its SUMMARY.md too. Keep drilling until you've identified the specific files you need.
+
+### Step 4: Read source files
+
+Only now open the actual source files the wiki pointed you to.
+
+## Worked example
+
+Task: "Add a new CLI subcommand that lists active policies"
 
 ```
-{{WIKI_PATH}}                        → Find the right top-level directory
-  └─ {dir}/SUMMARY.md               → Find the right subdirectory or file
-      └─ {dir}/{subdir}/SUMMARY.md  → Narrow further if needed
-          └─ {dir}/{subdir}/file.go → Read the actual source
+1. Read {{WIKI_PATH}}
+   → Navigation guide says: "To modify CLI commands → cmd/"
+   → Also says: "Policy management → internal/policy/"
+
+2. Read {{WIKI_DIR}}/cmd/SUMMARY.md
+   → Shows cmd/leash/main.go handles command routing
+   → Shows cmd/leash/commands.go defines subcommands
+
+3. Read {{WIKI_DIR}}/internal/policy/SUMMARY.md
+   → Shows policy.Manager type with ListActive() method
+   → Shows policy/store.go handles persistence
+
+4. Now read the actual files:
+   → cmd/leash/commands.go (to add the new subcommand)
+   → internal/policy/store.go (to understand the ListActive API)
 ```
 
-## Rules
+Total files read: 4 (wiki) + 2 (source) = 6, instead of searching the entire codebase.
 
-- **Never skip the wiki.** Even if you think you know where something is, confirm via the wiki. The codebase may have been reorganized.
-- **Read top-down.** Start from `{{WIKI_PATH}}`, not from a random SUMMARY.md. The root page has context that child pages assume you have.
-- **Trust the wiki for orientation, trust the code for details.** The wiki tells you where to look and what to expect. The source code is the ground truth for implementation details.
-- **If the wiki is missing or stale**, fall back to normal exploration but note it — the wiki may need regeneration via `wikigen`.
+## Multi-directory tasks
+
+If your task spans multiple directories (e.g., adding an API endpoint that touches `cmd/`, `internal/`, and `controlui/`):
+
+1. Read the root wiki.md once
+2. Read each relevant directory's SUMMARY.md
+3. Build a mental map of which files need changes before opening any source
+4. Read source files in dependency order (data layer first, then API, then UI)
+
+## What NOT to do
+
+- **Don't grep the entire repo** for a keyword. The wiki's "When to look here" sections are faster and more accurate.
+- **Don't read files speculatively.** If the wiki doesn't mention a file as relevant, you probably don't need it.
+- **Don't skip the root wiki.md** and jump straight to a SUMMARY.md. The root has architecture context that child pages assume you know.
+- **Don't assume file paths from memory.** Files get moved. The wiki reflects the current structure.
+
+## When the wiki isn't enough
+
+The wiki covers structure and purpose. For these, use other tools:
+- **Recent changes**: `git log`, `git blame`
+- **Runtime behavior**: test output, logs
+- **Exact implementation details**: read the source (after the wiki points you to it)
+- **If the wiki is missing or stale**: fall back to normal exploration. The wiki may need regeneration via `wikigen`.

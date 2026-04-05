@@ -1341,8 +1341,19 @@ func writeSkillFiles(cfg config) {
 			continue
 		}
 
-		// Replace the placeholder with the actual wiki path.
+		// Replace placeholders with actual wiki paths.
+		wikiDir := filepath.Dir(wikiRel)
+		if wikiDir == "." {
+			wikiDir = ""
+		}
 		section := strings.ReplaceAll(string(data), "{{WIKI_PATH}}", wikiRel)
+		// When wiki is in repo root, {{WIKI_DIR}}/ should collapse to empty
+		// so paths like "{{WIKI_DIR}}/cmd/SUMMARY.md" become "cmd/SUMMARY.md".
+		if wikiDir == "" {
+			section = strings.ReplaceAll(section, "{{WIKI_DIR}}/", "")
+		} else {
+			section = strings.ReplaceAll(section, "{{WIKI_DIR}}", wikiDir)
+		}
 		wrappedSection := fmt.Sprintf("%s\n%s\n%s", wikiSectionStart, strings.TrimSpace(section), wikiSectionEnd)
 
 		outName := filepath.Base(name)
