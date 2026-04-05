@@ -91,6 +91,14 @@ type config struct {
 	jsonProgress      bool
 	apiKey            string
 	noDefaultExcludes bool
+	noDepsGraph       bool
+	noFileIndex       bool
+	noRecipes         bool
+	noTraces          bool
+	noBoundaries      bool
+	noTestHints       bool
+	noSymbolIndex     bool
+	noChurn           bool
 }
 
 type fileEntry struct {
@@ -214,6 +222,19 @@ func main() {
 		os.MkdirAll(cfg.wikiRoot, 0755)
 	}
 
+	// Build parent→children map for child navigation in HTML.
+	parentChildren := make(map[string][]string)
+	for _, rel := range dirs {
+		parent := filepath.Dir(rel)
+		if parent == "." {
+			parent = ""
+		}
+		parentChildren[parent] = append(parentChildren[parent], filepath.Base(rel))
+	}
+	for k := range parentChildren {
+		sort.Strings(parentChildren[k])
+	}
+
 	// 4. Process directories: summarize dirty ones, load existing for clean ones.
 	summaries := make(map[string]string)
 	newManifest := &manifest{
@@ -245,7 +266,7 @@ func main() {
 			if existing != "" && !cfg.dryRun {
 				htmlPath := filepath.Join(cfg.wikiRoot, rel, "SUMMARY.html")
 				if _, err := os.Stat(htmlPath); os.IsNotExist(err) {
-					writeHTMLPage(htmlPath, filepath.Base(rel), existing, rel)
+					writeHTMLPage(htmlPath, filepath.Base(rel), existing, rel, parentChildren[rel])
 				}
 			}
 			emitProgress(cfg, progressEvent{Event: "skip", Dir: rel, Status: "unchanged"})
@@ -271,7 +292,7 @@ func main() {
 			continue
 		}
 
-		summary, err := summarize(cfg.apiKey, bundle)
+		summary, err := summarize(cfg, bundle)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "  warning: summarization failed for %s: %v\n", rel, err)
 			summary = fmt.Sprintf("Summary generation failed for `%s`.", rel)
@@ -297,7 +318,7 @@ func main() {
 
 		// Write SUMMARY.html alongside the markdown.
 		htmlPath := filepath.Join(outDir, "SUMMARY.html")
-		if err := writeHTMLPage(htmlPath, filepath.Base(rel), md, rel); err != nil {
+		if err := writeHTMLPage(htmlPath, filepath.Base(rel), md, rel, parentChildren[rel]); err != nil {
 			fmt.Fprintf(os.Stderr, "  error writing %s: %v\n", htmlPath, err)
 		}
 
@@ -343,7 +364,7 @@ func main() {
 
 		// Write index.html alongside wiki.md.
 		indexPath := filepath.Join(cfg.wikiRoot, "index.html")
-		if err := writeHTMLPage(indexPath, "Codebase Wiki", wiki, ""); err != nil {
+		if err := writeHTMLPage(indexPath, "Codebase Wiki", wiki, "", parentChildren[""]); err != nil {
 			fmt.Fprintf(os.Stderr, "error writing index.html: %v\n", err)
 		}
 
@@ -403,6 +424,22 @@ func parseArgs() config {
 			cfg.jsonProgress = true
 		case a == "--no-default-excludes":
 			cfg.noDefaultExcludes = true
+		case a == "--no-deps-graph":
+			cfg.noDepsGraph = true
+		case a == "--no-file-index":
+			cfg.noFileIndex = true
+		case a == "--no-recipes":
+			cfg.noRecipes = true
+		case a == "--no-traces":
+			cfg.noTraces = true
+		case a == "--no-boundaries":
+			cfg.noBoundaries = true
+		case a == "--no-test-hints":
+			cfg.noTestHints = true
+		case a == "--no-symbol-index":
+			cfg.noSymbolIndex = true
+		case a == "--no-churn":
+			cfg.noChurn = true
 		case a == "--help" || a == "-h":
 			printUsage()
 			os.Exit(0)
@@ -465,6 +502,14 @@ Flags:
   --json               Emit line-delimited JSON progress events on stderr
   --dry-run            Show what would be summarized without calling the API
   --clean              Remove all generated files and manifest from wiki folder
+  --no-deps-graph      Omit dependency graph from generated summaries
+  --no-file-index      Omit file index from generated summaries
+  --no-recipes         Omit recipes from generated summaries
+  --no-traces          Omit traces from generated summaries
+  --no-boundaries      Omit boundary section from generated summaries
+  --no-test-hints      Omit testing section from generated summaries
+  --no-symbol-index    Omit symbol index from generated summaries
+  --no-churn           Omit churn data from generated summaries
   --help               Show this help message`)
 }
 
@@ -894,13 +939,11 @@ type apiResponse struct {
 	} `json:"error"`
 }
 
-func summarize(apiKey string, b dirBundle) (string, error) {
+func summarize(cfg config, b dirBundle) (string, error) {
 	prompt := buildPrompt(b)
 
-	reqBody := apiRequest{
-		Model:     llmModel,
-		MaxTokens: 2048,
-		System: `You are writing documentation for an LLM that will use this wiki to understand and modify a codebase. The LLM reads the wiki top-down, so each summary must help it both navigate (which files to open) and comprehend (how things work and connect) without reading every source file.
+	var sysPrompt strings.Builder
+	sysPrompt.WriteString(`You are writing documentation for an LLM that will use this wiki to understand and modify a codebase. The LLM reads the wiki top-down, so each summary must help it both navigate (which files to open) and comprehend (how things work and connect) without reading every source file.
 
 Write a markdown summary following this structure:
 
@@ -924,7 +967,23 @@ Which other packages/directories does this code import from or get called by? Li
 
 If you can determine this from the code, include it. If you cannot determine the full picture, list what you can see from imports and function signatures.
 
-## Configuration
+`)
+
+	if !cfg.noBoundaries {
+		sysPrompt.WriteString(`## Boundary
+State whether this directory is: **public** (exported API, meant to be imported by other packages), **internal** (implementation detail, not meant for direct external use), or **entry point** (binary/command, not imported). One sentence on what the contract is — what callers can rely on.
+
+`)
+	}
+
+	if !cfg.noTestHints {
+		sysPrompt.WriteString(`## Testing
+Where tests live (colocated _test.go files, separate tests/ directory, or __tests__/). Note the testing pattern: table-driven, fixtures, mocks, integration vs unit. If there are test helpers or shared fixtures, name them. Skip this section if there are no tests in this directory.
+
+`)
+	}
+
+	sysPrompt.WriteString(`## Configuration
 Note any environment variables, config files, CLI flags, or constants that control behavior in this directory. Skip this section if there are none.
 
 ## When to look here
@@ -937,7 +996,12 @@ Guidelines:
 - Be concise but not shallow. Prioritize understanding over brevity.
 - Do not invent functionality not present in the code.
 - Use relative file links for files in this directory.
-- Omit any section that has no meaningful content (e.g., skip Configuration if there are no config knobs).`,
+- Omit any section that has no meaningful content (e.g., skip Configuration if there are no config knobs).`)
+
+	reqBody := apiRequest{
+		Model:     llmModel,
+		MaxTokens: 2048,
+		System:    sysPrompt.String(),
 		Messages: []apiMessage{
 			{Role: "user", Content: prompt},
 		},
@@ -953,7 +1017,7 @@ Guidelines:
 		return "", fmt.Errorf("create request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("x-api-key", apiKey)
+	req.Header.Set("x-api-key", cfg.apiKey)
 	req.Header.Set("anthropic-version", apiVersion)
 
 	resp, err := http.DefaultClient.Do(req)
@@ -1110,12 +1174,16 @@ var htmlTemplate = template.Must(template.New("page").Parse(`<!DOCTYPE html>
   pre code { background: none; padding: 0; font-size: 0.85em; }
   hr { border: none; border-top: 1px solid var(--border); margin: 2rem 0; }
   strong { font-weight: 600; }
+  nav.children { font-size: 0.85rem; color: var(--muted); margin-top: 2rem; padding: 0.5rem 0.75rem; background: var(--nav-bg); border-radius: 6px; }
+  nav.children a { color: var(--link); text-decoration: none; margin: 0 0.25rem; }
+  nav.children a:hover { text-decoration: underline; }
   .generated { font-size: 0.75rem; color: var(--muted); text-align: center; margin-top: 3rem; padding-top: 1rem; border-top: 1px solid var(--border); }
 </style>
 </head>
 <body>
 {{if .Breadcrumb}}<nav class="breadcrumb">{{.Breadcrumb}}</nav>{{end}}
 {{.Body}}
+{{if .ChildNav}}{{.ChildNav}}{{end}}
 <div class="generated">Generated by wikigen</div>
 </body>
 </html>
@@ -1125,6 +1193,7 @@ type htmlPage struct {
 	Title      string
 	Breadcrumb template.HTML
 	Body       template.HTML
+	ChildNav   template.HTML
 }
 
 // markdownToHTML converts markdown text to an HTML body fragment.
@@ -1171,8 +1240,20 @@ func buildBreadcrumb(rel string) template.HTML {
 	return template.HTML(strings.Join(crumbs, " / "))
 }
 
+// buildChildNav creates an HTML nav element linking to child directory summaries.
+func buildChildNav(childDirs []string) template.HTML {
+	if len(childDirs) == 0 {
+		return ""
+	}
+	var links []string
+	for _, child := range childDirs {
+		links = append(links, fmt.Sprintf(`<a href="%s/SUMMARY.html">%s/</a>`, child, child))
+	}
+	return template.HTML(fmt.Sprintf(`<nav class="children"><strong>Child directories:</strong> %s</nav>`, strings.Join(links, " &middot; ")))
+}
+
 // writeHTMLPage renders a markdown string as a styled HTML page.
-func writeHTMLPage(outPath, title, mdContent, rel string) error {
+func writeHTMLPage(outPath, title, mdContent, rel string, childDirs []string) error {
 	body := markdownToHTML(mdContent)
 	body = rewriteHTMLLinks(body)
 
@@ -1180,6 +1261,7 @@ func writeHTMLPage(outPath, title, mdContent, rel string) error {
 		Title:      title + " — Codebase Wiki",
 		Breadcrumb: buildBreadcrumb(rel),
 		Body:       template.HTML(body),
+		ChildNav:   buildChildNav(childDirs),
 	}
 
 	var buf bytes.Buffer
