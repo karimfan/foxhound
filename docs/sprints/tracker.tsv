@@ -1,2 +1,5 @@
 sprint_id	title	status	created_at	updated_at
-001	Rewrite Sprint Tooling from Python to Go	planned	2026-03-27T23:10:40Z	2026-03-27T23:10:40Z
+001	Rewrite Sprint Tooling from Python to Go	completed	2026-03-27T23:10:40Z	2026-03-28T19:20:03Z
+002	GTM Strategies for Agentic AI Security in the Enterprise	completed	2026-03-28T18:24:54Z	2026-03-28T19:28:04Z
+003	Hierarchical Codebase Wiki Generator	planned	2026-04-05T19:57:09Z	2026-04-05T19:57:09Z
+004	Wikigen External Output & Incremental Mode	planned	2026-04-05T20:17:14Z	2026-04-05T20:17:14Z
