@@ -20,6 +20,25 @@ Identifies code experts via git blame and log analysis, then lets LLM agents ask
 
 No Slack token needed for `who`, `sessions`, or `--dry-run`.
 
+## Slack app setup
+
+You need a Slack app to send messages. This is a one-time setup:
+
+1. Go to [api.slack.com/apps](https://api.slack.com/apps) and click **Create New App** → **From scratch**
+2. Name it (e.g., "Consult") and select your workspace
+3. Go to **OAuth & Permissions** → scroll to **Bot Token Scopes** → add:
+   - `chat:write` — send messages
+   - `users:read.email` — look up users by git email
+   - `im:write` — open DM conversations
+4. Click **Install to Workspace** and authorize
+5. Copy the **Bot User OAuth Token** (`xoxb-...`)
+6. Export it:
+   ```bash
+   export SLACK_BOT_TOKEN=xoxb-your-token-here
+   ```
+
+You can skip this entirely if you only use `consult who` or `--dry-run`.
+
 ## Commands
 
 ### `consult who` — Identify experts
