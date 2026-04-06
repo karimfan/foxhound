@@ -1,10 +1,15 @@
 package main
 
 import (
+	_ "embed"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 )
+
+//go:embed templates/CONSULT_SKILL.md
+var consultSkillTemplate []byte
 
 type cmdFlags struct {
 	file     string
@@ -131,9 +136,253 @@ func cmdWho(args []string) {
 	printExperts(experts)
 }
 
-func notImplemented(name string) {
-	fmt.Fprintf(os.Stderr, "%s: not yet implemented\n", name)
-	os.Exit(1)
+func cmdAsk(args []string) {
+	f := parseFlags(args)
+	target := targetPath(f)
+	if target == "" {
+		fmt.Fprintf(os.Stderr, "error: ask requires --file or --dir\n")
+		os.Exit(1)
+	}
+	if f.question == "" {
+		fmt.Fprintf(os.Stderr, "error: ask requires --question / -q\n")
+		os.Exit(1)
+	}
+
+	root := resolveRepoRoot(f)
+	experts, err := analyzeExperts(root, target)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	if len(experts) == 0 {
+		fmt.Fprintf(os.Stderr, "error: no experts found for %s\n", target)
+		os.Exit(1)
+	}
+
+	wikiExcerpt := loadWikiExcerpt(root, target)
+	message := buildAskMessage(f.question, experts, target, wikiExcerpt)
+
+	if f.dryRun {
+		fmt.Fprintln(os.Stderr, "--- Dry Run ---")
+		fmt.Fprintln(os.Stderr, "Experts:")
+		printExperts(experts)
+		fmt.Fprintln(os.Stderr, "Message:")
+		fmt.Fprintln(os.Stderr, message)
+		return
+	}
+
+	token := requireSlackToken()
+	experts = resolveExpertSlackIDs(token, root, experts)
+
+	if experts[0].SlackID == "" {
+		fmt.Fprintf(os.Stderr, "error: could not resolve Slack ID for top expert %s <%s>\n", experts[0].Name, experts[0].Email)
+		fmt.Fprintf(os.Stderr, "hint: add a mapping in .consult.json:\n")
+		fmt.Fprintf(os.Stderr, "  {\"user_map\": {\"%s\": \"U01XXXXXX\"}}\n", experts[0].Email)
+		os.Exit(1)
+	}
+
+	channelID, err := openDM(token, experts[0].SlackID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error opening DM: %v\n", err)
+		os.Exit(1)
+	}
+
+	threadTS, err := postMessage(token, channelID, message)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error sending message: %v\n", err)
+		os.Exit(1)
+	}
+
+	s, err := createSession(root, target, f.question, "ask", experts, channelID, threadTS)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error creating session: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Contacted %s (%s) via Slack DM\n", experts[0].Name, experts[0].Email)
+	fmt.Printf("Session ID: %s\n", s.ID)
+	fmt.Printf("Check for a reply with: consult check --session %s\n", s.ID)
+}
+
+func cmdPropose(args []string) {
+	f := parseFlags(args)
+	target := targetPath(f)
+	if target == "" {
+		fmt.Fprintf(os.Stderr, "error: propose requires --file or --dir\n")
+		os.Exit(1)
+	}
+	if f.question == "" {
+		fmt.Fprintf(os.Stderr, "error: propose requires --question / -q\n")
+		os.Exit(1)
+	}
+	if f.diff == "" {
+		fmt.Fprintf(os.Stderr, "error: propose requires --diff\n")
+		os.Exit(1)
+	}
+
+	root := resolveRepoRoot(f)
+	experts, err := analyzeExperts(root, target)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	if len(experts) == 0 {
+		fmt.Fprintf(os.Stderr, "error: no experts found for %s\n", target)
+		os.Exit(1)
+	}
+
+	wikiExcerpt := loadWikiExcerpt(root, target)
+	message := buildProposeMessage(f.question, f.diff, experts, target, wikiExcerpt)
+
+	if f.dryRun {
+		fmt.Fprintln(os.Stderr, "--- Dry Run ---")
+		fmt.Fprintln(os.Stderr, "Experts:")
+		printExperts(experts)
+		fmt.Fprintln(os.Stderr, "Message:")
+		fmt.Fprintln(os.Stderr, message)
+		return
+	}
+
+	token := requireSlackToken()
+	experts = resolveExpertSlackIDs(token, root, experts)
+
+	if experts[0].SlackID == "" {
+		fmt.Fprintf(os.Stderr, "error: could not resolve Slack ID for top expert %s <%s>\n", experts[0].Name, experts[0].Email)
+		fmt.Fprintf(os.Stderr, "hint: add a mapping in .consult.json:\n")
+		fmt.Fprintf(os.Stderr, "  {\"user_map\": {\"%s\": \"U01XXXXXX\"}}\n", experts[0].Email)
+		os.Exit(1)
+	}
+
+	channelID, err := openDM(token, experts[0].SlackID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error opening DM: %v\n", err)
+		os.Exit(1)
+	}
+
+	threadTS, err := postMessage(token, channelID, message)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error sending message: %v\n", err)
+		os.Exit(1)
+	}
+
+	s, err := createSession(root, target, f.question, "propose", experts, channelID, threadTS)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error creating session: %v\n", err)
+		os.Exit(1)
+	}
+
+	fmt.Printf("Contacted %s (%s) via Slack DM\n", experts[0].Name, experts[0].Email)
+	fmt.Printf("Session ID: %s\n", s.ID)
+	fmt.Printf("Check for a reply with: consult check --session %s\n", s.ID)
+}
+
+func cmdCheck(args []string) {
+	f := parseFlags(args)
+	if f.session == "" {
+		fmt.Fprintf(os.Stderr, "error: check requires --session\n")
+		os.Exit(1)
+	}
+
+	root := resolveRepoRoot(f)
+	s, err := loadSession(root, f.session)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+
+	if s.Status == "complete" {
+		fmt.Printf("Session %s is already complete.\n", s.ID)
+		fmt.Printf("Response:\n%s\n", s.Response)
+		return
+	}
+
+	token := requireSlackToken()
+	response, found, err := checkSessionResponse(token, s)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error checking for response: %v\n", err)
+		os.Exit(1)
+	}
+
+	if found {
+		s.Status = "complete"
+		s.Response = response
+		if err := updateSession(root, s); err != nil {
+			fmt.Fprintf(os.Stderr, "error updating session: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("Response received for session %s:\n%s\n", s.ID, response)
+	} else {
+		fmt.Println("No response yet.")
+	}
+}
+
+func cmdSessions(args []string) {
+	f := parseFlags(args)
+	root := resolveRepoRoot(f)
+	sessions, err := listSessions(root)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		os.Exit(1)
+	}
+	if len(sessions) == 0 {
+		fmt.Println("No consultation sessions found.")
+		return
+	}
+	printSessions(sessions)
+}
+
+func cmdUpdateSkills(args []string) {
+	f := parseFlags(args)
+	root := resolveRepoRoot(f)
+	skillContent := string(consultSkillTemplate)
+
+	section := "<!-- consult:start -->\n" + skillContent + "\n<!-- consult:end -->"
+
+	targets := []string{"CLAUDE.md", "AGENTS.md"}
+	for _, name := range targets {
+		path := filepath.Join(root, name)
+		data, err := os.ReadFile(path)
+		if err != nil {
+			// File doesn't exist — create with section
+			if os.IsNotExist(err) {
+				if err := os.WriteFile(path, []byte(section+"\n"), 0o644); err != nil {
+					fmt.Fprintf(os.Stderr, "error writing %s: %v\n", name, err)
+					os.Exit(1)
+				}
+				fmt.Printf("Created %s with consult skill section\n", name)
+				continue
+			}
+			fmt.Fprintf(os.Stderr, "error reading %s: %v\n", name, err)
+			os.Exit(1)
+		}
+
+		content := string(data)
+		startMarker := "<!-- consult:start -->"
+		endMarker := "<!-- consult:end -->"
+		startIdx := strings.Index(content, startMarker)
+		endIdx := strings.Index(content, endMarker)
+
+		if startIdx >= 0 && endIdx >= 0 && endIdx > startIdx {
+			// Replace existing section
+			content = content[:startIdx] + section + content[endIdx+len(endMarker):]
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				fmt.Fprintf(os.Stderr, "error writing %s: %v\n", name, err)
+				os.Exit(1)
+			}
+			fmt.Printf("Updated consult skill section in %s\n", name)
+		} else {
+			// Append section
+			if !strings.HasSuffix(content, "\n") {
+				content += "\n"
+			}
+			content += "\n" + section + "\n"
+			if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+				fmt.Fprintf(os.Stderr, "error writing %s: %v\n", name, err)
+				os.Exit(1)
+			}
+			fmt.Printf("Appended consult skill section to %s\n", name)
+		}
+	}
 }
 
 func main() {
@@ -149,15 +398,15 @@ func main() {
 	case cmd == "who":
 		cmdWho(rest)
 	case cmd == "ask":
-		notImplemented("ask")
+		cmdAsk(rest)
 	case cmd == "propose":
-		notImplemented("propose")
+		cmdPropose(rest)
 	case cmd == "check":
-		notImplemented("check")
+		cmdCheck(rest)
 	case cmd == "sessions":
-		notImplemented("sessions")
+		cmdSessions(rest)
 	case cmd == "--update-skills":
-		notImplemented("--update-skills")
+		cmdUpdateSkills(rest)
 	case cmd == "--help" || cmd == "-h" || cmd == "help":
 		printUsage()
 	default:
