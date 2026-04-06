@@ -340,3 +340,7 @@ The skill teaches a three-layer approach:
 - **Be specific**: Name the file and the concern, not "how does auth work?"
 - **Explain your proposed change**: So the expert can flag risks you don't see
 - **One question per consult**: Multiple unrelated questions reduce response quality
+
+## Example skill files
+
+See [`sample-skills/`](../sample-skills/) for real-world examples of the `CLAUDE.md` and `AGENTS.md` files that include the consult skill section, and a sample `.consult.slack.json` configuration file.

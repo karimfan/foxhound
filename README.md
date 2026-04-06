@@ -59,3 +59,10 @@ Each tool has its own README with full usage, flags, examples, and skill file do
 
 - **[wikigen/README.md](wikigen/README.md)** — Wiki generator
 - **[consult/README.md](consult/README.md)** — Expert consultation
+
+## Sample skill files
+
+The [`sample-skills/`](sample-skills/) directory contains example `CLAUDE.md` and `AGENTS.md` files showing what both tools generate when installed on a real repo. These are the skill files that teach LLM agents how to navigate the wiki and consult human experts.
+
+- **[sample-skills/CLAUDE.md](sample-skills/CLAUDE.md)** — Example skill file for Claude Code
+- **[sample-skills/AGENTS.md](sample-skills/AGENTS.md)** — Example skill file for Codex

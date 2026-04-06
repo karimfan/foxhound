@@ -210,3 +210,7 @@ target-repo/
   CLAUDE.md                      Skill file for Claude Code
   AGENTS.md                      Skill file for Codex
 ```
+
+## Example skill files
+
+See [`sample-skills/`](../sample-skills/) for real-world examples of the `CLAUDE.md` and `AGENTS.md` files that wikigen generates, showing the three-layer navigation approach and root artifact lookup table.
