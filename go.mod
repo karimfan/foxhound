@@ -1,4 +1,4 @@
-module wikigen
+module foxhound
 
 go 1.25.6
 

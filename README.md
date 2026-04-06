@@ -1,68 +1,97 @@
-# wikigen
+# foxhound
 
-A Go CLI that generates hierarchical markdown and HTML documentation for any codebase, optimized for LLM navigation and comprehension. It traverses a repository bottom-up, sends source files to the Claude API for summarization, and produces a navigable wiki with per-directory summaries, cross-repository indexes, and git-derived analysis.
+A suite of tools that help LLM agents write better code. Each tool addresses a different gap in how LLMs understand and modify codebases.
 
-## How it works
+| Tool | What it does | Directory |
+|------|-------------|-----------|
+| **wikigen** | Generates hierarchical wiki documentation for any codebase | `wikigen/` |
+| **consult** | Identifies code experts via git history and lets agents ask them questions via Slack | `consult/` |
+
+## Requirements
+
+- Go 1.21+
+- Git
+
+## Quick start
+
+```bash
+# Build both tools
+go build -o wikigen ./wikigen/
+go build -o consult ./consult/
+
+# Generate a wiki for a repo
+ANTHROPIC_API_KEY=... ./wikigen --output /path/to/wiki /path/to/repo
+
+# Find who knows about a file
+./consult who --file path/to/file.go
+
+# Ask an expert via Slack (requires SLACK_BOT_TOKEN)
+./consult ask --file path/to/file.go --question "Is this safe to change?"
+```
+
+---
+
+## wikigen
+
+Generates hierarchical markdown and HTML documentation for any codebase, optimized for LLM navigation and comprehension. Traverses a repository bottom-up, sends source files to the Claude API for summarization, and produces a navigable wiki with per-directory summaries, cross-repository indexes, and git-derived analysis.
+
+### How it works
 
 1. Walks the directory tree in post-order (deepest directories first)
 2. At each directory, reads source files and detects their language
 3. Sends file contents + child directory summaries to Claude Haiku for summarization
-4. Writes a `SUMMARY.md` and `SUMMARY.html` in the wiki output folder for each directory
+4. Writes a `SUMMARY.md` and `SUMMARY.html` for each directory
 5. Generates root-level artifacts: dependency graph, file index, symbol index, churn overlay
 6. Analyzes git co-change history and generates modification recipes (1 LLM call)
 7. Generates entry point traces showing end-to-end execution flows (1 LLM call)
 8. Generates a root-level project overview via a separate LLM call
 9. Generates `wiki.md` and `index.html` linking everything together
-10. Writes `CLAUDE.md` and `AGENTS.md` skill files into the repo root to teach LLMs how to use the wiki
-11. Saves a `.wikigen-manifest.json` so subsequent runs only regenerate changed directories
+10. Writes `CLAUDE.md` and `AGENTS.md` skill files into the repo root
+11. Saves a `.wikigen-manifest.json` for incremental runs
 
-## Requirements
+### Requirements
 
-- Go 1.21+
-- `ANTHROPIC_API_KEY` environment variable set
+- `ANTHROPIC_API_KEY` environment variable
 - Git (optional, for co-change recipes, churn overlay, and fast incremental detection)
 
-## Usage
+### Usage
 
 ```bash
-# Full scan — write wiki to /path/to/wiki from /path/to/repo
-go run . --output /path/to/wiki /path/to/repo
+# Full scan
+go run ./wikigen/ --output /path/to/wiki /path/to/repo
 
-# Preview what would be scanned (no API calls, no files written)
-go run . --dry-run --output /path/to/wiki /path/to/repo
+# Preview (no API calls)
+go run ./wikigen/ --dry-run --output /path/to/wiki /path/to/repo
 
-# Incremental run (automatic when manifest exists from a previous run)
-go run . --output /path/to/wiki /path/to/repo
+# Incremental (automatic when manifest exists)
+go run ./wikigen/ --output /path/to/wiki /path/to/repo
 
-# Force full regeneration, ignoring the manifest
-go run . --full --output /path/to/wiki /path/to/repo
+# Force full regeneration
+go run ./wikigen/ --full --output /path/to/wiki /path/to/repo
 
-# Remove all generated files from the wiki folder
-go run . --clean --output /path/to/wiki /path/to/repo
+# Remove all generated files
+go run ./wikigen/ --clean --output /path/to/wiki /path/to/repo
 
 # Skip expensive features (saves 2 LLM calls)
-go run . --no-recipes --no-traces --output /path/to/wiki /path/to/repo
+go run ./wikigen/ --no-recipes --no-traces --output /path/to/wiki /path/to/repo
 
-# Minimal run — only directory summaries, no extras
-go run . --no-deps-graph --no-file-index --no-recipes --no-traces \
-         --no-boundaries --no-test-hints --no-symbol-index --no-churn \
-         --output /path/to/wiki /path/to/repo
+# Update skill files only (no scan, no API key needed)
+go run ./wikigen/ --update-skills /path/to/repo
 ```
 
-If `--output` is omitted, the wiki is written in-place inside the repo.
-
-## Flags
+### Flags
 
 | Flag | Description |
 |------|-------------|
 | `--output <dir>` | Wiki output directory (default: in-place in repo) |
 | `--exclude <name>` | Exclude a directory by base name (repeatable) |
 | `--no-default-excludes` | Clear default exclusions (only `.git` is still skipped) |
-| `--base-url <url>` | URL prefix for source file links (e.g. `https://github.com/org/repo/blob/main`) |
+| `--base-url <url>` | URL prefix for source file links |
 | `--full` | Force full regeneration, ignore manifest |
 | `--json` | Emit line-delimited JSON progress events on stderr |
 | `--dry-run` | Show what would be summarized without calling the API |
-| `--clean` | Remove all generated files and manifest from the wiki folder |
+| `--clean` | Remove all generated files and manifest |
+| `--update-skills` | Update CLAUDE.md and AGENTS.md without scanning |
 | `--no-deps-graph` | Skip dependency graph generation (`deps-graph.md`) |
 | `--no-file-index` | Skip file index generation (`file-index.md`) |
 | `--no-recipes` | Skip modification recipes (`recipes.md`, saves 1 LLM call) |
@@ -72,257 +101,125 @@ If `--output` is omitted, the wiki is written in-place inside the repo.
 | `--no-symbol-index` | Skip symbol index generation (`symbol-index.md`) |
 | `--no-churn` | Skip churn overlay generation (`churn.md`) |
 
-## Enhanced wiki features
+### Generated artifacts
 
-All features below are **on by default**. Use the `--no-*` flags to disable individual features.
+All on by default. Each can be disabled with its `--no-*` flag.
 
-### Dependency graph (`deps-graph.md`)
+| Artifact | Description |
+|----------|-------------|
+| `wiki.md` / `index.html` | Root overview with architecture, navigation guide, and links to all artifacts |
+| `{dir}/SUMMARY.md` / `.html` | Per-directory summary with key files, types, dependencies, boundary, testing |
+| `deps-graph.md` | Directory dependency adjacency list with boundary annotations |
+| `file-index.md` | Flat file lookup table (name, directory, language, description) |
+| `symbol-index.md` | Key types, functions, interfaces and their locations |
+| `recipes.md` | Git co-change derived modification patterns |
+| `traces.md` | Entry point execution traces |
+| `churn.md` | Recent activity by directory (90 days) |
 
-A text-based adjacency list showing how directories depend on each other. Extracted from the `## Dependencies` section of each directory summary and annotated with boundary classifications (public/internal/entry point).
+### LLM cost
 
-```
-pkg/auth (public) → pkg/db, pkg/config
-pkg/api (public) → pkg/auth, pkg/db, pkg/middleware
-cmd/server (entry point) → pkg/api, pkg/config
-```
+For a repo with 50 directories on a full scan: ~52 LLM calls (50 dirs + 1 root + 1 recipes). Incremental runs only regenerate changed directories.
 
-Useful for blast radius assessment — an LLM can see which directories are affected before changing a shared package.
+### Incremental mode
 
-Disable: `--no-deps-graph`
+wikigen saves `.wikigen-manifest.json` and uses `git diff` (or hash comparison) to detect changes. Only dirty directories and their ancestors are re-summarized.
 
-### File index (`file-index.md`)
+### Supported languages
 
-A flat table mapping every source file to its directory, language, and a one-liner description. Built from a direct repo scan (file paths and languages) enriched with descriptions from directory summaries.
+Go, Swift, TypeScript, JavaScript, C, Python, Shell, Make, Docker, YAML, TOML, JSON.
 
-| File | Directory | Language | Description |
-|------|-----------|----------|-------------|
-| handler.go | pkg/api | Go | HTTP request handlers for the REST API |
-| store.go | pkg/db | Go | Database persistence layer |
+---
 
-Useful for stack trace lookup — an LLM can find any file's location and purpose without tree traversal.
+## consult
 
-Disable: `--no-file-index`
+Identifies code experts via git blame/log analysis and lets LLM agents ask them questions via Slack. The tool finds who has been most active in the code being modified and sends them a structured message with context.
 
-### Symbol index (`symbol-index.md`)
+### Requirements
 
-Key exported types, interfaces, and functions with their locations. Extracted from the `## Key types and interfaces` section of each directory summary.
+- `SLACK_BOT_TOKEN` environment variable (for `ask`/`propose`/`check` commands)
+  - Required scopes: `chat:write`, `users:read.email`, `im:write`
+- Git
+- No Slack token needed for `who`, `sessions`, or `--dry-run`
 
-| Symbol | Kind | Location |
-|--------|------|----------|
-| `PolicySet` | type | pkg/policy/types.go |
-| `Compile()` | func | pkg/cedar/compiler.go |
-| `Store` | interface | pkg/db/store.go |
-
-Disable: `--no-symbol-index`
-
-### Modification recipes (`recipes.md`)
-
-"To add a new X, touch files A, B, C." Derived from git co-change history — files that appear in the same commits frequently are clustered, then an LLM call turns the clusters into named recipes.
-
-Requires: Git repo with 50+ commits in the last year.
-
-Costs: 1 additional LLM call.
-
-Disable: `--no-recipes`
-
-### Entry point traces (`traces.md`)
-
-2-3 critical end-to-end execution paths traced from entry points through the codebase, naming specific files and functions at each step.
-
-Costs: 1 additional LLM call.
-
-Disable: `--no-traces`
-
-### Boundary annotations
-
-Each directory summary includes a `## Boundary` section classifying the directory as **public** (exported API), **internal** (implementation detail), or **entry point** (binary/command). Helps an LLM avoid coupling to internals or breaking public contracts.
-
-Disable: `--no-boundaries`
-
-### Test hints
-
-Each directory summary includes a `## Testing` section noting where tests live (colocated, separate directory), the testing pattern (table-driven, fixtures, mocks), and any test helpers. Helps an LLM write tests that match the project's existing style.
-
-Disable: `--no-test-hints`
-
-### Churn overlay (`churn.md`)
-
-Directories ranked by recent commit frequency over the last 90 days, classified as high/medium/low churn.
-
-| Directory | Commits (90d) | Churn |
-|-----------|---------------|-------|
-| pkg/api | 47 | high |
-| pkg/auth | 23 | medium |
-| pkg/config | 2 | low |
-
-Requires: Git repo with 30+ days of history.
-
-Disable: `--no-churn`
-
-## LLM cost
-
-| Feature | LLM calls |
-|---------|-----------|
-| Directory summaries | 1 per dirty directory |
-| Root overview | 1 |
-| Modification recipes | 1 (opt-out: `--no-recipes`) |
-| Entry point traces | 1 (opt-out: `--no-traces`) |
-| All other features | 0 (local aggregation or git analysis) |
-
-For a repo with 50 directories on a full scan, expect ~52 LLM calls (50 dirs + 1 root + 1 recipes). Incremental runs only regenerate changed directories plus recipes/traces.
-
-## HTML output
-
-Alongside every markdown file, wikigen generates a styled HTML page:
-
-- `index.html` — browsable version of `wiki.md`
-- `{dir}/SUMMARY.html` — browsable version of each `SUMMARY.md`
-- `deps-graph.html`, `file-index.html`, `symbol-index.html`, `recipes.html`, `traces.html`, `churn.html` — browsable versions of all root artifacts
-
-Features:
-- Light/dark mode (follows system preference)
-- Breadcrumb navigation (upward through the tree)
-- Child directory navigation (downward links to children)
-- All `.md` links rewritten to `.html` for seamless browser navigation
-- Responsive layout, monospace code blocks
-
-Open the wiki in a browser:
+### Usage
 
 ```bash
-open /path/to/wiki/index.html
+# Find who knows about a file (no Slack needed)
+go run ./consult/ who --file internal/auth/handler.go
+
+# Ask a question via Slack
+go run ./consult/ ask --file internal/auth/handler.go \
+    --question "Is there a rate limit middleware I should use?"
+
+# Propose a change with a diff
+go run ./consult/ propose --file internal/auth/handler.go \
+    --diff "$(git diff HEAD)" \
+    --question "Does this look safe?"
+
+# Preview without sending (no token needed)
+go run ./consult/ ask --dry-run --file internal/auth/handler.go \
+    --question "test question"
+
+# Check for a response
+go run ./consult/ check --session abc123
+
+# List all consultation sessions
+go run ./consult/ sessions
+
+# Update CLAUDE.md/AGENTS.md with consult skill
+go run ./consult/ --update-skills
 ```
 
-## LLM skill files
+### Expert ranking
 
-wikigen automatically writes `CLAUDE.md` and `AGENTS.md` into the **target repo root** (not the wiki output directory). These files teach Claude Code and Codex how to navigate the wiki.
+Experts are scored by: `(commits_90d * 3) + (commits_1y * 1) + (blame_lines * 0.5)`. Weights favor recent activity over total history over current line ownership. Top 3 experts are returned.
 
-The skill files contain:
-- The concrete path to `wiki.md` relative to the repo root
-- Step-by-step navigation instructions (read wiki.md first, drill into SUMMARY.md, read source last)
-- A visual navigation pattern showing the top-down hierarchy
+### Identity resolution
 
-**Safe for existing files.** If a `CLAUDE.md` or `AGENTS.md` already exists in the repo, wikigen **appends** a clearly delimited section using marker comments:
+1. **Primary**: Slack `users.lookupByEmail` — zero config when git email matches Slack email
+2. **Fallback**: Optional `.consult.json` at repo root for manual overrides:
 
-```markdown
-<!-- wikigen:start -->
-# Codebase Navigation via Wiki
-...
-<!-- wikigen:end -->
+```json
+{
+  "user_map": {
+    "alice-old@personal.com": "U12345"
+  },
+  "default_channel": "C_TEAM_CHANNEL"
+}
 ```
 
-- On subsequent runs, only the content between these markers is updated
-- `--clean` removes just the wikigen section, leaving the rest of the file intact
-- If the file was entirely wikigen-generated and `--clean` is run, the file is deleted
+### Session management
 
-## Navigation-oriented summaries
+Consultations are async. Sessions are stored in `.consult/` under the repo root. Poll with `consult check --session <id>`.
 
-Each summary is designed for LLM task routing, not just documentation:
+---
 
-- **Project overview** (root wiki.md): Architecture snapshot, navigation guide mapping task categories to directories, and links to all root artifacts
-- **Directory summaries**: Include "When to look here" (task routing), "Boundary" (API contract), "Testing" (test patterns), "Dependencies" (imports/imported by), and "How it works" (internal flow)
-- **Annotated contents**: Every directory listing includes one-line descriptions, not just bare links
-
-This lets an LLM match a task description to the right code location in 2-3 file reads instead of searching the entire codebase.
-
-## Default exclusions
-
-These directories are excluded by default (in addition to all dot-prefixed directories):
-
-- `.claude`
-- `.codex`
-- `docs`
-
-Override with `--no-default-excludes` and add your own with `--exclude`:
-
-```bash
-go run . --no-default-excludes --exclude vendor --exclude node_modules --output ./wiki /path/to/repo
-```
-
-## Incremental mode
-
-On the first run, wikigen scans the entire tree and writes `.wikigen-manifest.json` to the wiki folder. This manifest records SHA-256 hashes of every source file and generated summary.
-
-On subsequent runs:
-
-- If the repo is a git repository, wikigen uses `git diff` to detect changed files (fast)
-- Otherwise, it compares file hashes against the manifest (portable)
-- Only directories with changed files are re-summarized
-- Changes propagate upward — modifying a leaf file regenerates its directory, all ancestor directories, and `wiki.md`
-- Root artifacts (deps-graph, file-index, etc.) are regenerated when any summary changes
-
-## Output structure
-
-Given a repo like:
+## Project structure
 
 ```
-myrepo/
-  cmd/
-    main.go
-  internal/
-    server/
-      handler.go
-      router.go
-    db/
-      store.go
-```
-
-wikigen produces:
-
-```
-wiki-output/
-  wiki.md                          # Top-level overview with navigation guide
-  index.html                       # Browsable HTML version of wiki.md
-  deps-graph.md                    # Directory dependency adjacency list
-  deps-graph.html
-  file-index.md                    # Flat file lookup table
-  file-index.html
-  symbol-index.md                  # Key types/functions and locations
-  symbol-index.html
-  recipes.md                       # Git co-change derived modification patterns
-  recipes.html
-  traces.md                        # Entry point execution traces
-  traces.html
-  churn.md                         # Recent activity by directory
-  churn.html
-  .wikigen-manifest.json           # Incremental state
-  cmd/
-    SUMMARY.md                     # Summary of cmd/
-    SUMMARY.html                   # Browsable HTML with child nav
-  internal/
-    SUMMARY.md                     # Summary of internal/ (references children)
-    SUMMARY.html
-    server/
-      SUMMARY.md                   # Summary of server package
-      SUMMARY.html
-    db/
-      SUMMARY.md                   # Summary of db package
-      SUMMARY.html
-
-myrepo/
-  CLAUDE.md                        # Wiki navigation instructions for Claude Code
-  AGENTS.md                        # Wiki navigation instructions for Codex
+foxhound/
+  wikigen/
+    wikigen.go         # Wiki generator (single-file Go tool)
+    templates/         # Embedded skill file templates
+  consult/
+    main.go            # CLI entry point and subcommand dispatch
+    git.go             # Git blame/log analysis, expert ranking
+    slack.go           # Slack API client, identity resolution
+    message.go         # Message formatting, wiki excerpt loading
+    session.go         # Async session management
+    templates/         # Embedded skill file template
+  docs/
+    sprints/           # Sprint planning documents
+  go.mod               # Shared Go module
+  README.md            # This file
 ```
 
 ## CI/CD integration
 
-wikigen is designed to run in CI pipelines. Use `--json` for machine-readable progress:
+Both tools are designed for CI. wikigen supports `--json` for machine-readable progress:
 
 ```bash
-go run . --json --output ./wiki /path/to/repo 2>progress.jsonl
+go run ./wikigen/ --json --output ./wiki /path/to/repo 2>progress.jsonl
 ```
 
-Each line is a JSON event:
-
-```json
-{"event":"regenerate","dir":"internal/server","status":"dirty","files_changed":2}
-{"event":"skip","dir":"internal/db","status":"unchanged"}
-{"event":"done","message":"Regenerated 3/12 directories (5 skipped)"}
-```
-
-Exit codes: `0` = success, `1` = error, `2` = partial failure (some directories failed).
-
-## Supported languages
-
-Go, Swift, TypeScript, JavaScript, C, Python, Shell, Make, Docker, YAML, TOML, JSON.
-
-Binary files, generated files (containing "Code generated" or "DO NOT EDIT"), lock files (`go.sum`, `pnpm-lock.yaml`, `package-lock.json`), and files over 100KB are automatically skipped.
+Exit codes: `0` = success, `1` = error, `2` = partial failure.
